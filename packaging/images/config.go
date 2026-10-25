@@ -125,6 +125,12 @@ func (c Config) Changed(paths []string) []Package {
 			"packaging/images", "packaging/builder", "packaging/common/scripts",
 			"cmd/build-packages", "cmd/image-metadata", "packaging/tests/images", "testutil",
 			"Makefile", "go.mod", "go.sum", ".github/workflows/images.yml",
+			// Shipped inside the Python package: the cross-compiled validator
+			// at /usr/lib/opentelemetry/python/otel-config-check, and the
+			// attribution NOTICE. Without these a commit that only fixes the
+			// validator selects nothing, and the published image keeps serving
+			// the previous one with no signal.
+			"cmd/otel-config-check", "NOTICE",
 		} {
 			if under(path, shared) {
 				return c.Packages

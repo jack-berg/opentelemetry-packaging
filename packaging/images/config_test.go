@@ -40,6 +40,10 @@ func TestChanged(t *testing.T) {
 		{"shared Dockerfile", []string{"packaging/images/Dockerfile"}, cfg.Packages},
 		{"builder", []string{"packaging/builder/components.go"}, cfg.Packages},
 		{"workflow", []string{".github/workflows/images.yml"}, cfg.Packages},
+		// Both ship inside the Python package, so a change to either alters
+		// image contents and must not select nothing.
+		{"config check", []string{"cmd/otel-config-check/main.go"}, cfg.Packages},
+		{"notice", []string{"NOTICE"}, cfg.Packages},
 		{"unrelated", []string{"packaging/common/not-supported/release.txt", "README.md"}, []Package{}},
 		{"prefix collision", []string{"packaging/common/" + first.Component + "-other/release.txt"}, []Package{}},
 	} {
