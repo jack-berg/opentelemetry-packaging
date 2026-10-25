@@ -8,11 +8,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/goreleaser/nfpm/v2/files"
 )
+
+// Architectures are the target architectures package builds support. Callers
+// that accept an architecture from configuration or a flag validate against
+// this rather than keeping their own copy of the list.
+var Architectures = []string{"amd64", "arm64"}
+
+// SupportedArchitecture reports whether arch is one of Architectures.
+func SupportedArchitecture(arch string) bool {
+	return slices.Contains(Architectures, arch)
+}
 
 // Installation paths (FHS-compliant).
 const (

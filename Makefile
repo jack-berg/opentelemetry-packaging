@@ -108,15 +108,15 @@ images:
 		$(MAKE) image-$$component; \
 	done
 
-image-packages-%:
+image-packages-%: otel-config-check
 	go run ./cmd/image-metadata -component $*
-	rm -rf $(IMAGE_CONTEXT)/$(ARCH)
-	go run ./cmd/build-packages -version $(IMAGE_VERSION) -arch $(ARCH) -format deb \
-		-component $* -output $(IMAGE_CONTEXT)/$(ARCH)
+	rm -rf "$(IMAGE_CONTEXT)/$(ARCH)"
+	go run ./cmd/build-packages -version $(IMAGE_VERSION) -arch "$(ARCH)" -format deb \
+		-component $* -output "$(IMAGE_CONTEXT)/$(ARCH)"
 
 image-%: image-packages-%
-	$(CONTAINER_ENGINE) build --platform linux/$(ARCH) \
-		--build-arg TARGETARCH=$(ARCH) --build-arg PACKAGE=$(IMAGE_PACKAGE) \
+	$(CONTAINER_ENGINE) build --platform "linux/$(ARCH)" \
+		--build-arg TARGETARCH="$(ARCH)" --build-arg PACKAGE=$(IMAGE_PACKAGE) \
 		-f packaging/images/Dockerfile -t $(IMAGE_REF) $(IMAGE_CONTEXT)
 
 # -count=1 because the container image is not an input Go's test cache tracks:

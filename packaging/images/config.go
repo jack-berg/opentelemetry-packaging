@@ -65,9 +65,31 @@ func Load(packagingDir string) (Config, error) {
 		if arch.Arch == "" || arch.Runner == "" || arches[arch.Arch] {
 			return cfg, fmt.Errorf("invalid or duplicate architecture %q", arch.Arch)
 		}
+		// The value reaches Make recipes and $GITHUB_OUTPUT unquoted, and
+		// otherwise only fails deep inside build-packages once CI has already
+		// provisioned a runner for it.
+		if !builder.SupportedArchitecture(arch.Arch) {
+			return cfg, fmt.Errorf("unsupported architecture %q (expected one of %s)", arch.Arch, strings.Join(builder.Architectures, ", "))
+		}
 		arches[arch.Arch] = true
 	}
 	return cfg, nil
+}
+
+// CheckPins reports configured components that have no upstream version pin.
+// Load cannot do this: it runs against configuration alone, while the pins
+// live in the packaging tree. Without it a component the builder knows but
+// that has no release.txt -- python, whose pins live in requirements.txt, or
+// meta, which has no directory at all -- passes validation and then fans out
+// CI jobs that every one of them fails.
+func (c Config) CheckPins(packagingDir string) error {
+	for _, pkg := range c.Packages {
+		pin := filepath.Join(packagingDir, "common", pkg.Component, "release.txt")
+		if _, err := os.Stat(pin); err != nil {
+			return fmt.Errorf("image component %q has no upstream version pin: %w", pkg.Component, err)
+		}
+	}
+	return nil
 }
 
 func (c Config) Package(component string) (Package, error) {

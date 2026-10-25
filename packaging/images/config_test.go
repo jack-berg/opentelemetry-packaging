@@ -49,6 +49,27 @@ func TestChanged(t *testing.T) {
 	}
 }
 
+// Every configured component must have an upstream version pin, or the whole
+// build matrix for it fails after CI has provisioned runners.
+func TestConfiguredComponentsHavePins(t *testing.T) {
+	cfg, err := Load("..")
+	require.NoError(t, err)
+	require.NoError(t, cfg.CheckPins(".."))
+}
+
+func TestCheckPins(t *testing.T) {
+	cfg, err := Load("..")
+	require.NoError(t, err)
+	// python's pins live in requirements.txt and meta has no directory, so
+	// both reach CI as configured components that cannot be built.
+	for _, component := range []string{"python", "meta"} {
+		t.Run(component, func(t *testing.T) {
+			unpinned := Config{Packages: []Package{{Component: component}}, Architectures: cfg.Architectures}
+			require.ErrorContains(t, unpinned.CheckPins(".."), component)
+		})
+	}
+}
+
 func TestLoadValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -60,6 +81,8 @@ func TestLoadValidation(t *testing.T) {
 		{"duplicate component", func(c *Config) { c.Packages = append(c.Packages, c.Packages[0]) }},
 		{"duplicate architecture", func(c *Config) { c.Architectures = append(c.Architectures, c.Architectures[0]) }},
 		{"missing runner", func(c *Config) { c.Architectures[0].Runner = "" }},
+		{"unsupported architecture", func(c *Config) { c.Architectures[0].Arch = "x86_64" }},
+		{"architecture with shell metacharacters", func(c *Config) { c.Architectures[0].Arch = "amd64; echo injected" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, err := Load("..")
