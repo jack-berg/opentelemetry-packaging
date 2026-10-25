@@ -80,12 +80,24 @@ jobs:
   publish:
     needs: [plan, build]
     # Only tested images from the official main branch may be published.
+    #
+    # Publication is per component: a build failure in one component must not
+    # withhold another component's tag, which no later run would republish --
+    # the next commit to affect that component carries a different version.
+    # Legs whose own builds produced no DEBs fail on the completeness check
+    # below rather than publishing a partial image.
     if: >-
+      !cancelled() &&
+      needs.plan.result == 'success' &&
+      needs.plan.outputs.packages != '[]' &&
       github.repository == 'open-telemetry/opentelemetry-packaging' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    # Publish exactly the packages selected by plan, once all native builds pass.
+    # Publish exactly the packages selected by plan.
     strategy:
+      # One component's publication failure must not cancel its siblings',
+      # which are queued in unrelated concurrency groups.
+      fail-fast: false
       matrix:
         package: ${{ fromJSON(needs.plan.outputs.packages) }}
     runs-on: ubuntu-24.04
@@ -115,6 +127,26 @@ jobs:
           pattern: image-packages-${{ matrix.package.component }}-*
           path: build/images/${{ matrix.package.component }}
           merge-multiple: true
+
+      # Exactly one DEB per configured architecture. Without this a leg whose
+      # build failed would reach the image build with a missing or ambiguous
+      # context, where COPY resolves a multi-match glob to a single file.
+      - name: Verify the tested DEBs are complete
+        env:
+          COMPONENT: ${{ matrix.package.component }}
+          PACKAGE: ${{ steps.metadata.outputs.package }}
+          PLATFORMS: ${{ needs.plan.outputs.platforms }}
+        run: |
+          status=0
+          for platform in ${PLATFORMS//,/ }; do
+            arch="${platform#linux/}"
+            count=$(find "build/images/$COMPONENT/$arch" -maxdepth 1 -name "${PACKAGE}_*.deb" 2>/dev/null | wc -l | tr -d '[:space:]')
+            if [[ "$count" -ne 1 ]]; then
+              echo "::error::expected exactly one ${PACKAGE}_*.deb for $arch, found $count"
+              status=1
+            fi
+          done
+          exit "$status"
 
       - name: Set up multi-architecture image builder
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
