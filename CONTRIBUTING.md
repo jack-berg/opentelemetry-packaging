@@ -3,6 +3,7 @@
 ## Prerequisites
 
 - **Go 1.26+** (package builds and tests are pure Go)
+- **git** (needed by the package-image metadata unit tests, which construct git histories to exercise build-plan selection)
 - **npm** (needed to fetch the Node.js auto-instrumentation agent from the npm registry)
 - **Python 3 with pip** (needed to fetch the Python auto-instrumentation packages; invoked as `python3 -m pip`)
 - **A container engine** (Podman or Docker, needed for package-image builds, local repository generation, and integration tests).
@@ -252,7 +253,7 @@ See [the image documentation](packaging/images/README.md) for configuration, ima
 
 ### Go command unit tests (fast, no containers)
 
-Unit tests cover the Go commands, package-image configuration, and build-plan selection.
+Unit tests cover the Go commands, the package builder, package-image configuration, and build-plan selection.
 
 ```sh
 make go-unit-tests

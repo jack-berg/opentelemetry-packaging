@@ -436,10 +436,12 @@ integration-test-rpm-vendor: local-rpm-repo local-rpm-vendor-repo
 # Unit Tests
 # ============================================================================
 
-# Unit tests for Go commands and package-image configuration.
+# Unit tests for Go commands, the package builder, and package-image
+# configuration. The image-metadata tests construct git histories, so git must
+# be on PATH; no containers or network access are needed.
 .PHONY: go-unit-tests
 go-unit-tests:
-	go test -v ./cmd/... ./packaging/images/
+	go test -v ./cmd/... ./packaging/builder/ ./packaging/images/
 
 # Unit tests for sitecustomize.py. They need the `packaging` module (a runtime
 # dependency of sitecustomize.py itself); a throwaway virtualenv keeps the
