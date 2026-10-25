@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -123,8 +124,21 @@ func planFromRef(out io.Writer, root, base string) error {
 	return plan(out, cfg, changed)
 }
 
+// git runs a git command, reporting its stderr on failure. Without it the only
+// diagnostic a failing publish job leaves behind is "exit status 128".
+func git(args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
+}
+
 func changedPaths(ref string) ([]string, error) {
-	data, err := exec.Command("git", "diff", "--no-renames", "--name-only", "-z", ref, "HEAD").Output()
+	data, err := git("diff", "--no-renames", "--name-only", "-z", ref, "HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -143,25 +157,29 @@ func checkPublication(out io.Writer, root, component, ref string) error {
 	if err != nil {
 		return err
 	}
-	commits, err := exec.Command("git", "rev-list", "--first-parent", "HEAD.."+ref).Output()
+	// Yield only to the tip of main, never to an intermediate commit.
+	//
+	// A workflow run exists per push, at the push head, so the commits in
+	// between -- those a rebase-merge, a merge-queue batch, or any
+	// multi-commit push brings in -- get no run of their own. Treating one as
+	// a superseding build suppresses this tag in favour of a build that never
+	// happens, and nothing publishes it: the run at the tip carries a
+	// different version, and a manual dispatch republishes whatever main
+	// pins now. The tip, by contrast, always has a run.
+	//
+	// So an older tag still publishes once the version has moved on, and the
+	// tip reclaims the tag only when it rebuilds that same version itself.
+	pin, err := git("-C", filepath.Join(root, "common", component), "show", ref+":./release.txt")
+	if err != nil {
+		return err
+	}
+	tipVersion, err := parseVersion(string(pin), component)
 	if err != nil {
 		return err
 	}
 	publish := true
-	// Look past newer tags for a superseding build of this tag.
-	for _, commit := range strings.Fields(string(commits)) {
-		pin, err := exec.Command("git", "-C", filepath.Join(root, "common", component), "show", commit+":./release.txt").Output()
-		if err != nil {
-			return err
-		}
-		candidateVersion, err := parseVersion(string(pin), component)
-		if err != nil {
-			return err
-		}
-		if candidateVersion != version {
-			continue
-		}
-		changed, err := changedPaths(commit)
+	if tipVersion == version {
+		changed, err := changedPaths(ref)
 		if err != nil {
 			return err
 		}
@@ -171,7 +189,6 @@ func checkPublication(out io.Writer, root, component, ref string) error {
 				break
 			}
 		}
-		break
 	}
 	_, err = fmt.Fprintf(out, "publish=%t\n", publish)
 	return err

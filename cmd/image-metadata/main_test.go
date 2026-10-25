@@ -162,7 +162,10 @@ func TestPublication(t *testing.T) {
 		{name: "same tag without v prefix", commits: []map[string]string{{pin: "2.32.0"}}, publish: false},
 		{name: "newer version does not suppress older tag", commits: []map[string]string{{pin: "v2.33.0"}}, publish: true},
 		{name: "shared changes for newer tag do not suppress older tag", commits: []map[string]string{{pin: "v2.33.0"}, {dockerfile: "new construction"}}, publish: true},
-		{name: "same-tag rebuild before newer version still supersedes", commits: []map[string]string{{dockerfile: "new construction"}, {pin: "v2.33.0"}}, publish: false},
+		// A commit in the middle of a multi-commit push gets no workflow run of
+		// its own, so it must not suppress this tag: nothing else would publish it.
+		{name: "intermediate same-tag commit does not supersede", commits: []map[string]string{{dockerfile: "new construction"}, {pin: "v2.33.0"}}, publish: true},
+		{name: "intermediate same-tag commit touching a shared path does not supersede", commits: []map[string]string{{"Makefile": "shared edit"}, {pin: "v2.33.0"}}, publish: true},
 		{name: "unmerged PR history does not supersede", commits: []map[string]string{{dockerfile: "new construction"}, {pin: "v2.33.0"}}, merge: true, publish: true},
 		{name: "rollback to same tag with newer inputs", commits: []map[string]string{{pin: "v2.33.0"}, {dockerfile: "new construction"}, {pin: "v2.32.0\n"}}, publish: false},
 		{name: "invalid newer pin fails closed", commits: []map[string]string{{pin: "invalid"}}, invalid: true},
@@ -205,8 +208,13 @@ func TestPublication(t *testing.T) {
 func TestPublicationMissingRef(t *testing.T) {
 	newImageRepo(t)
 	var out bytes.Buffer
-	require.Error(t, checkPublication(&out, "packaging", "java", "refs/heads/missing"))
+	err := checkPublication(&out, "packaging", "java", "refs/heads/missing")
+	require.Error(t, err)
 	require.Empty(t, out.String())
+	// A publish job that fails here must say what it ran and what git said,
+	// rather than leaving an operator with a bare "exit status 128".
+	require.Contains(t, err.Error(), "refs/heads/missing")
+	require.Contains(t, err.Error(), "invalid object name")
 }
 
 func TestPlan(t *testing.T) {

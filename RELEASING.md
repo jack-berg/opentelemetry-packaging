@@ -41,8 +41,9 @@ See [the image documentation](packaging/images/README.md) for contents, naming, 
 
 Every merged upstream version receives its own image tag, even when builds finish out of order.
 Publication jobs are serialized per component, retaining pending jobs rather than canceling them.
-Each publication job checks the first-parent history of `main` for newer inputs targeting the same component and upstream version, using the affected-component selector.
-Only superseded builds of that tag are skipped, while unrelated commits and different version tags do not block publication.
+Each publication job checks the current tip of `main` for newer inputs targeting the same component and upstream version, using the affected-component selector.
+It yields only to the tip, because a workflow run exists per push and the commits in between — those a rebase-merge or a multi-commit push brings in — never get a run of their own to publish the tag instead.
+Only builds the tip itself supersedes are skipped, while unrelated commits and different version tags do not block publication.
 
 Manual dispatch rebuilds all configured images for recovery, not as a required release step:
 
