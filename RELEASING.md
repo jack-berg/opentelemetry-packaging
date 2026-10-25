@@ -45,11 +45,20 @@ Each publication job checks the current tip of `main` for newer inputs targeting
 It yields only to the tip, because a workflow run exists per push and the commits in between — those a rebase-merge or a multi-commit push brings in — never get a run of their own to publish the tag instead.
 Only builds the tip itself supersedes are skipped, while unrelated commits and different version tags do not block publication.
 
-Manual dispatch rebuilds all configured images for recovery, not as a required release step:
+Manual dispatch rebuilds and republishes the images for the versions `main` pins at the time it runs, and is not a required release step.
+It cannot recover an older tag: the workflow reads each component’s version from the checked-out tree, so a dispatch after a pin has moved on republishes the newer version instead.
 
 ```sh
 gh workflow run images.yml
 ```
+
+To recover a tag whose publication failed, re-run the workflow run that was meant to publish it.
+A re-run checks out the commit it was originally triggered for, so it reads that commit’s pin and publishes the version that was missed.
+Re-running only the failed jobs reuses the DEBs the build jobs already tested, which are retained for 7 days.
+Re-running all jobs rebuilds those DEBs from the same commit, which is the option once the artifacts have expired.
+
+Should the run itself no longer be available, restore the pin in a commit on `main`.
+The component is then selected through the ordinary path, and its tag is published again.
 
 Publishing is restricted to the official repository’s `main` branch; pull requests and forks build and test without registry writes.
 The repository’s Actions token needs permission to create or update its GHCR packages; maintainers should also verify package visibility and anonymous pull access when first enabling publication.
