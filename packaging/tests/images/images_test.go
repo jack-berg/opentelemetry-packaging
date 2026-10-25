@@ -49,15 +49,21 @@ func TestPackageImage(t *testing.T) {
 	require.NotEmpty(t, engine)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	// Keep stderr out of the return value: callers use it as a container ID.
 	command := func(args ...string) string {
 		t.Helper()
-		out, err := exec.CommandContext(ctx, engine, args...).CombinedOutput()
-		require.NoError(t, err, "%s %v: %s", engine, args, out)
+		cmd := exec.CommandContext(ctx, engine, args...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		require.NoError(t, err, "%s %v: %s", engine, args, stderr.String())
 		return strings.TrimSpace(string(out))
 	}
 
 	expected := packageFiles(t, pkg.PackageName())
-	container := command("create", "--platform", "linux/"+arch, image)
+	// --pull=never keeps a missing or wrong-platform local image a failure
+	// rather than a silent test of the already published image.
+	container := command("create", "--pull=never", "--platform", "linux/"+arch, image)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cleanupCancel()
@@ -82,10 +88,19 @@ func TestPackageImage(t *testing.T) {
 		require.Equal(t, want, got, "package path %s", name)
 		roots["/"+strings.SplitN(strings.TrimPrefix(name, "/"), "/", 2)[0]] = true
 	}
-	for name := range actual {
-		for _, excluded := range []string{"/etc/ld.so.preload", "/var/lib/dpkg", "/tmp/package.deb"} {
-			require.False(t, name == excluded || strings.HasPrefix(name, excluded+"/"), "unexpected installation state %s", name)
+	// The image may carry the package's own payload and the base image, and
+	// nothing else. Anything further is build or installation state that leaked
+	// in -- a dpkg database, an ld.so.preload written by a maintainer script,
+	// the DEB itself, a byte-compiled .pyc. Comparing against the base rather
+	// than a hard-coded path list keeps this meaningful for every component.
+	base := baseFiles(ctx, t, engine, arch)
+	for name, got := range actual {
+		if _, ok := expected[name]; ok {
+			continue
 		}
+		want, ok := base[name]
+		require.True(t, ok, "unexpected installation state %s: in neither the package nor the base image", name)
+		require.Equal(t, want, got, "base image path %s", name)
 	}
 
 	args := []string{
@@ -149,6 +164,59 @@ func TestArchiveFiles(t *testing.T) {
 		"/etc/example/config": {kind: tar.TypeReg, mode: 0o640, digest: fmt.Sprintf("%x", sha256.Sum256([]byte("abc")))},
 		"/config-link":        {kind: tar.TypeSymlink, mode: 0o777, link: "/etc/example/config"},
 	}, archiveFiles(t, tar.NewReader(&buffer)))
+}
+
+// baseFiles exports the final stage's base image from the Dockerfile, so the
+// test can tell the base layer apart from state the build leaked in.
+func baseFiles(ctx context.Context, t *testing.T, engine, arch string) map[string]entry {
+	t.Helper()
+	dockerfile, err := os.ReadFile(filepath.Join(testutil.RepoRoot(t), "packaging", "images", "Dockerfile"))
+	require.NoError(t, err)
+	var base string
+	for line := range strings.SplitSeq(string(dockerfile), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || !strings.EqualFold(fields[0], "FROM") {
+			continue
+		}
+		// Skip FROM flags such as --platform to reach the image reference.
+		for _, field := range fields[1:] {
+			if !strings.HasPrefix(field, "--") {
+				base = field
+				break
+			}
+		}
+	}
+	require.NotEmpty(t, base, "no FROM instruction in packaging/images/Dockerfile")
+
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, engine, args...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		require.NoError(t, err, "%s %v: %s", engine, args, stderr.String())
+		return strings.TrimSpace(string(out))
+	}
+	// The base is an upstream image rather than the artifact under test, so
+	// unlike the image itself it may legitimately be pulled here.
+	container := run("create", "--platform", "linux/"+arch, base)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cleanupCancel()
+		out, err := exec.CommandContext(cleanupCtx, engine, "rm", "--force", container).CombinedOutput()
+		if err != nil {
+			t.Errorf("removing base container: %v: %s", err, out)
+		}
+	})
+	export := exec.CommandContext(ctx, engine, "export", container)
+	var stderr bytes.Buffer
+	export.Stderr = &stderr
+	stdout, err := export.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, export.Start())
+	files := archiveFiles(t, tar.NewReader(stdout))
+	require.NoError(t, export.Wait(), "%s", stderr.String())
+	return files
 }
 
 func packageFiles(t *testing.T, packageName string) map[string]entry {

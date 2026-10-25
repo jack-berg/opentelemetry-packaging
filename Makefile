@@ -119,9 +119,12 @@ image-%: image-packages-%
 		--build-arg TARGETARCH=$(ARCH) --build-arg PACKAGE=$(IMAGE_PACKAGE) \
 		-f packaging/images/Dockerfile -t $(IMAGE_REF) $(IMAGE_CONTEXT)
 
+# -count=1 because the container image is not an input Go's test cache tracks:
+# the test reaches it through the container engine, so a rebuilt or retagged
+# image would otherwise replay a stale PASS.
 integration-test-image-%: image-%
 	IMAGE_COMPONENT=$* IMAGE_REF=$(IMAGE_REF) IMAGE_PACKAGES_DIR=$(IMAGE_CONTEXT)/$(ARCH) \
-		CONTAINER_ENGINE=$(CONTAINER_ENGINE) go test -v -timeout 5m ./packaging/tests/images/
+		CONTAINER_ENGINE=$(CONTAINER_ENGINE) go test -v -count=1 -timeout 5m ./packaging/tests/images/
 
 # ============================================================================
 # Source RPM (rpmbuild path, used by COPR)
